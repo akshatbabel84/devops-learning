@@ -1,5 +1,10 @@
 # devops-learning
-This repo is for DevOps learning purpose
+
+This repo is for DevOps learning purpose.
+
+## Day 1
+
+```hcl
 terraform {
   required_providers {
     aws = {
@@ -16,33 +21,91 @@ provider "aws" {
 resource "aws_s3_bucket" "my_first_bucket" {
   bucket = "akshat-devops-learning-bucket-2026"
 }
+```
 
->> applied terraform init 
+Applied `terraform init`.
 
->> What terraform init actually did
-- Found and downloaded the AWS provider plugin — specifically version 5.100.0, which satisfies your ~> 5.0 constraint (meaning "any 5.x, but not 6.0")
-- Created .terraform/ — a hidden folder in your directory containing the actual downloaded provider binary/code. You never touch this manually.
-- Created .terraform.lock.hcl — this is important. It records the exact version (5.100.0) that was installed, down to a cryptographic hash. This means if you or a teammate runs init again next month and HashiCorp has released 5.101.0, Terraform will still install 5.100.0 — guaranteeing everyone gets identical behavior. This is why the message says to commit this lock file to git — it's part of making your infrastructure reproducible, a core IaC principle.
+### What `terraform init` actually did
 
->> terraform plan
+- Found and downloaded the AWS provider plugin — specifically version 5.100.0, which satisfies the `~> 5.0` constraint (meaning "any 5.x, but not 6.0")
+- Created `.terraform/` — a hidden folder containing the actual downloaded provider binary/code. Never touched manually.
+- Created `.terraform.lock.hcl` — records the exact version (5.100.0) installed, down to a cryptographic hash. This means running `init` again later will still install 5.100.0, guaranteeing everyone gets identical behavior. This is why the lock file gets committed to git — it's part of making infrastructure reproducible, a core IaC principle.
 
-Reading the plan output
+### `terraform plan`
 
-The + symbol means "this will be created." If you ever see - it means "destroy," and ~ means "modify in place." This is the visual language of every Terraform plan — get used to spotting these three symbols, they tell you the story instantly.
+**Reading the plan output:**
 
-(known after apply) — this is important to understand. Things like object_lock_configuration, versioning, website, etc. show this because AWS itself decides/generates these values once the bucket is actually created (some are defaults AWS assigns, some depend on server-side behavior). Terraform can't know them in advance — it only finds out after it actually talks to AWS. This is normal, not an error.
+The `+` symbol means "this will be created." `-` means "destroy," and `~` means "modify in place." This is the visual language of every Terraform plan.
 
-The summary line — this is the most important line in any plan output:
+`(known after apply)` — things like `object_lock_configuration`, `versioning`, `website` show this because AWS itself decides/generates these values once the resource is actually created. Terraform can't know them in advance. Normal, not an error.
 
+**The summary line** — the most important line in any plan output:
+
+```
 Plan: 1 to add, 0 to change, 0 to destroy.
+```
 
-This is Terraform's contract with you: exactly 1 new resource, nothing modified, nothing destroyed. Before running apply on any real project (especially client work later), this summary line is the first thing you check — if it ever says something unexpected like "3 to destroy" when you only meant to add something, that's your signal to stop and investigate before you accidentally delete someone's infrastructure.
+This is Terraform's contract: exactly what will change. Before running `apply` on any real project, this line is the first thing to check — an unexpected "3 to destroy" is the signal to stop and investigate before accidentally deleting real infrastructure.
 
-The note about -out — Terraform is telling you that between plan and apply, someone else could change something in AWS, making this exact plan stale. For solo learning, ignore this. In real team/client work, best practice is:
+**The `-out` note** — Terraform warning that between `plan` and `apply`, someone else could change something in AWS, making the plan stale. For solo learning, ignore. In real team/client work, best practice is:
 
-bash
+```bash
 terraform plan -out=tfplan
 terraform apply tfplan
+```
 
-This saves the exact plan to a file and forces apply to use precisely what was reviewed — no surprises. We'll adopt this habit starting next week; for today, keep it simple.
+This saves the exact reviewed plan to a file and forces `apply` to use precisely that — no surprises.
 
+---
+
+## Day 2
+
+Built on top of the Day 1 bucket by adding variables, tags, a versioning resource, and a `.tfvars` file.
+
+```hcl
+variable "dev_bucket1" {
+  type        = string
+  description = "Name of the s3 bucket to create"
+  default     = "akshat-devops-learning-bucket-2026"
+}
+
+variable "enable_versioning" {
+  type        = bool
+  description = "Controls whether bucket versioning is enabled"
+  default     = true
+}
+
+variable "environment" {
+  type        = string
+  description = "Environment tag, e.g. dev or prod"
+  default     = "dev"
+}
+
+resource "aws_s3_bucket" "my_first_bucket" {
+  bucket = var.dev_bucket1
+
+  tags = {
+    Environment = var.environment
+  }
+}
+
+resource "aws_s3_bucket_versioning" "my_first_bucket_versioning" {
+  bucket = aws_s3_bucket.my_first_bucket.id
+  versioning_configuration {
+    status = var.enable_versioning ? "Enabled" : "Suspended"
+  }
+}
+```
+
+### What was learned
+
+- **Variables** make code reusable — `default` is the fallback used only when nothing else supplies a value. Actual overrides come from a `terraform.tfvars` file, `-var` flags, or environment variables, in that order of priority.
+- **`variable` blocks and `.tfvars` files work together, not as replacements.** The `variable` block is the declaration (always stays in code); `.tfvars` only supplies an override value for a specific run/environment.
+- **Resource references** — `aws_s3_bucket.my_first_bucket.id` lets one resource reference another's attribute. Terraform auto-detects the dependency and creates resources in the correct order without being told explicitly.
+- **Conditional expressions (ternary)** — `condition ? value_if_true : value_if_false`, used to drive `status` from the `enable_versioning` variable.
+- **Real AWS constraint discovered:** once S3 versioning is `Enabled`, it can never go back to `Disabled` — only `Enabled` or `Suspended`. Attempting `"Disabled"` throws a real AWS API error, not a Terraform bug. `Suspended` stops new versions being created but keeps all existing versions and data intact — the safe way to "turn off" versioning on a bucket with real data.
+- **`terraform destroy` is only safe for disposable/test infrastructure**, never for anything with real data — in-place `apply` changes (like Enabled → Suspended) are the safe path for real resources. `force_destroy = true` is a dangerous flag that overrides AWS's built-in protection against deleting a non-empty bucket, and should never be set on production data.
+
+### Next
+
+Repetition drills — rebuilding this same S3 + variables + versioning setup from a blank file, multiple times, before introducing new concepts. See `SYNTAX_NOTES.md` for the syntax cheat sheet.
